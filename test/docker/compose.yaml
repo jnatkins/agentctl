@@ -1,0 +1,18 @@
+services:
+  worker:
+    build:
+      context: ../..
+      dockerfile: test/docker/Dockerfile
+    command: ["/workspace/agentctl/test/scripts/inside-ssh-worker.sh"]
+    volumes:
+      - "${AGENTCTL_SSH_DIR:?AGENTCTL_SSH_DIR is required}:/ssh:ro"
+
+  controller:
+    build:
+      context: ../..
+      dockerfile: test/docker/Dockerfile
+    command: ["/workspace/agentctl/test/scripts/inside-remote-controller.sh"]
+    depends_on:
+      - worker
+    volumes:
+      - "${AGENTCTL_SSH_DIR:?AGENTCTL_SSH_DIR is required}:/ssh:ro"

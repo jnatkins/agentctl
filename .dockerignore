@@ -1,0 +1,5 @@
+.git
+.agentctl-test
+.agentctl-render
+dist
+tmp

@@ -34,10 +34,21 @@ During local development:
 
 ```sh
 go test ./...
+go vet ./...
 go run ./cmd/agentctl check -f examples/agentctl.toml
 go run ./cmd/agentctl plan -f examples/agentctl.toml
 go run ./cmd/agentctl render -f examples/agentctl.toml --out /tmp/agentctl-render
 ```
+
+Docker validation:
+
+```sh
+./test/scripts/validate-clean-room.sh
+./test/scripts/validate-remote-ssh.sh
+```
+
+See [docs/validation.md](docs/validation.md) for what each tier proves and what
+still needs a real macOS canary.
 
 ## Commands
 
