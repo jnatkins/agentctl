@@ -217,3 +217,7 @@ func (w AgentWorkload) DisplayName() string {
 func (w AgentWorkload) SourceDir() string { return w.sourceDir }
 func (a AuxService) SourceDir() string    { return a.sourceDir }
 func (i Integration) SourceDir() string   { return i.sourceDir }
+func (s SkillPack) SourceDir() string     { return s.sourceDir }
+func (h HarnessExtension) SourceDir() string {
+	return h.sourceDir
+}
