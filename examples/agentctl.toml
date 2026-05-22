@@ -28,6 +28,15 @@ branch = "main"
 update_policy = "fast-forward-only"
 targets = ["all-agent-boxes"]
 
+[[skill_packs]]
+id = "personal-agent-skills"
+source = "~/dev/agent-skills/plugins"
+install_path = "~/.codex/skills"
+compatibility_aliases = ["~/.agents/skills"]
+harnesses = ["codex", "claude", "opencode"]
+targets = ["all-agent-boxes"]
+notes = "Canonical harness-neutral skills rendered into harness-specific adapters."
+
 [[integrations]]
 id = "playwright"
 type = "mcp_stdio"

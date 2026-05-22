@@ -54,7 +54,7 @@ func All(c *catalog.Catalog, opts Options) ([]File, error) {
 func Codex(c *catalog.Catalog, opts Options) ([]File, error) {
 	var files []File
 	for _, w := range c.AgentWorkloads {
-		if w.Status == "disabled" || w.Kind != "schedule" || !target.Matches(w.Targets, c, opts.Selector) || !contains(w.Harnesses, "codex") {
+		if !isActive(w.Status) || w.Kind != "schedule" || !target.Matches(w.Targets, c, opts.Selector) || !contains(w.Harnesses, "codex") {
 			continue
 		}
 		path := filepath.Join(opts.OutputDir, "codex", "automations", w.ID, "automation.toml")
@@ -108,7 +108,7 @@ func Claude(c *catalog.Catalog, opts Options) ([]File, error) {
 	servers := make(map[string]map[string]any)
 	allowed := make([]string, 0)
 	for _, in := range c.Integrations {
-		if in.Status == "disabled" || !target.Matches(in.Targets, c, opts.Selector) || !contains(in.Harnesses, "claude") || !strings.HasPrefix(in.Type, "mcp_") {
+		if !isActive(in.Status) || !target.Matches(in.Targets, c, opts.Selector) || !contains(in.Harnesses, "claude") || !strings.HasPrefix(in.Type, "mcp_") {
 			continue
 		}
 		server := make(map[string]any)
@@ -165,7 +165,7 @@ func Claude(c *catalog.Catalog, opts Options) ([]File, error) {
 func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 	var files []File
 	for _, w := range c.AgentWorkloads {
-		if w.Status == "disabled" || !target.Matches(w.Targets, c, opts.Selector) || (w.Kind != "daemon" && w.Kind != "queue") {
+		if !isActive(w.Status) || !target.Matches(w.Targets, c, opts.Selector) || (w.Kind != "daemon" && w.Kind != "queue") {
 			continue
 		}
 		content := launchdPlist("dev.agentctl.workload."+slug(w.ID), w.DisplayName(), w.Command, w.Args, w.CWD, w.LogPath, w.RestartPolicy)
@@ -177,7 +177,7 @@ func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 		})
 	}
 	for _, svc := range c.AuxServices {
-		if svc.Status == "disabled" || !target.Matches(svc.Targets, c, opts.Selector) || svc.Command == "" {
+		if !isActive(svc.Status) || !target.Matches(svc.Targets, c, opts.Selector) || svc.Command == "" {
 			continue
 		}
 		content := launchdPlist("dev.agentctl.service."+slug(svc.ID), svc.ID, svc.Command, svc.Args, svc.CWD, svc.LogPath, svc.RestartPolicy)
@@ -306,6 +306,10 @@ func defaultString(value, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func isActive(status string) bool {
+	return status == "" || status == "active"
 }
 
 func existingTimestamps(path string) (int64, int64) {

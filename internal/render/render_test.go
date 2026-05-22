@@ -110,3 +110,21 @@ func TestLaunchdRenderQueueWorkload(t *testing.T) {
 		}
 	}
 }
+
+func TestLaunchdSkipsPlannedServices(t *testing.T) {
+	c := &catalog.Catalog{
+		Version:      1,
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		AuxServices: []catalog.AuxService{{
+			ID: "planned", Type: "mcp_gateway", Status: "planned", Targets: []string{"all"}, Command: "/usr/local/bin/planned",
+		}},
+	}
+	files, err := Launchd(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"})
+	if err != nil {
+		t.Fatalf("Launchd() error = %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("files len = %d, want 0", len(files))
+	}
+}

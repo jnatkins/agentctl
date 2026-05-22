@@ -36,6 +36,32 @@ unknown = true
 	}
 }
 
+func TestDiscoverCatalogPrefersAgentctlRoot(t *testing.T) {
+	dir := t.TempDir()
+	state := filepath.Join(dir, "state")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"agentctl.toml":    "version = 1\n",
+		"automations.toml": "version = 1\n",
+		"repos.toml":       "legacy = true\n",
+	} {
+		if err := os.WriteFile(filepath.Join(state, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths, err := DiscoverCatalogs(dir)
+	if err != nil {
+		t.Fatalf("DiscoverCatalogs() error = %v", err)
+	}
+	wantAgentctl := filepath.Join(state, "agentctl.toml")
+	wantAutomations := filepath.Join(state, "automations.toml")
+	if len(paths) != 2 || paths[0] != wantAgentctl || paths[1] != wantAutomations {
+		t.Fatalf("paths = %#v, want [%q %q]", paths, wantAgentctl, wantAutomations)
+	}
+}
+
 func TestLegacyAutomationsBecomeWorkloads(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "prompt.md"), []byte("do work"), 0o644); err != nil {

@@ -12,11 +12,31 @@ import (
 )
 
 func DiscoverCatalogs(cwd string) ([]string, error) {
-	candidates := []string{
+	rootCandidates := []string{
 		filepath.Join(cwd, "agentctl.toml"),
 		filepath.Join(cwd, "state", "agentctl.toml"),
+	}
+	for _, root := range rootCandidates {
+		if _, err := os.Stat(root); err == nil {
+			paths := []string{root}
+			for _, extra := range []string{
+				filepath.Join(cwd, "state", "workloads.toml"),
+				filepath.Join(cwd, "state", "automations.toml"),
+				filepath.Join(cwd, "state", "integrations.toml"),
+			} {
+				if extra != root {
+					if _, err := os.Stat(extra); err == nil {
+						paths = append(paths, extra)
+					}
+				}
+			}
+			sort.Strings(paths)
+			return paths, nil
+		}
+	}
+
+	candidates := []string{
 		filepath.Join(cwd, "state", "hosts.toml"),
-		filepath.Join(cwd, "state", "repos.toml"),
 		filepath.Join(cwd, "state", "workloads.toml"),
 		filepath.Join(cwd, "state", "automations.toml"),
 		filepath.Join(cwd, "state", "integrations.toml"),
