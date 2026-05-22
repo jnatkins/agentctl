@@ -19,6 +19,7 @@ integrations, workloads, repos, and service wrappers.
 | --- | --- |
 | `host` | Machine inventory, target groups, roles, SSH aliases. |
 | `repo` | Managed git checkout and update policy. |
+| `credential_source` | Secretless pointer to bootstrap credentials supplied outside the catalog. |
 | `agent_runtime` | Codex, Claude, or another harness runtime expectation. |
 | `harness_config` | Low-level harness settings such as hooks, trust, approval defaults, model defaults, enabled plugins. |
 | `harness_extension` | Installed plugin, adapter, wrapper, or package that extends a harness. |
@@ -59,6 +60,19 @@ MCP is treated as a protocol/interface boundary, not a primary resource.
 
 V1 has built-in integration types for `mcp_stdio`, `mcp_http`, `mcp_sse`, and
 `mcp_hosted_connector`.
+
+## Bootstrap Credentials
+
+`agentctl` follows the Terraform-style boundary for credentials: the catalog can
+declare where a credential should come from, but it does not contain the secret
+value. For V1, `credential_source` supports `type = "github_token_env"` so a
+repo can declare `auth_ref = "github-agent-repos"` and receive an HTTPS GitHub
+token through a scoped environment variable during clone or pull.
+
+The token is passed to `git` with a temporary askpass helper and is never written
+into repo remotes or rendered config. Missing bootstrap credentials show up in
+`plan` as high-risk checks and fail `apply` with an explicit error before
+interactive Git prompts can hang a remote run.
 
 ## Render Targets
 

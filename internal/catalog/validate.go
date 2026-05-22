@@ -46,11 +46,12 @@ var builtinHarnesses = map[string]bool{
 var allowedWorkloadKinds = set("schedule", "daemon", "queue")
 var allowedStatuses = set("", "active", "planned", "disabled", "deprecated")
 var allowedRepoPolicies = set("", "check-only", "fast-forward-only", "clone-only", "manual")
+var allowedCredentialSourceTypes = set("github_token_env")
 var allowedIntegrationTypes = set("mcp_stdio", "mcp_http", "mcp_sse", "mcp_hosted_connector", "cli", "http", "browser_devtools", "dwh_wrapper")
 var allowedAuxTypes = set("mcp_gateway", "http_service", "bot_relay", "scheduler", "helper_daemon")
 var allowedStateTypes = set("file", "directory", "sqlite", "queue", "external")
 var allowedDataTypes = set("slack", "gmail", "google_calendar", "google_drive", "notion", "clickhouse", "filesystem", "web", "github", "queue", "browser", "custom")
-var allowedProbeTypes = set("fake", "command", "file_exists", "path_exists", "connector", "http")
+var allowedProbeTypes = set("fake", "command", "file_exists", "path_exists", "env", "connector", "http")
 var allowedRuntimeTypes = set("", "codex", "claude", "opencode", "custom")
 
 func set(values ...string) map[string]bool {
@@ -74,6 +75,7 @@ func Validate(c *Catalog) ValidationResult {
 
 	hostIDs := collect("host", c.Hosts, func(h Host) string { return h.ID }, &r)
 	repoIDs := collect("repo", c.Repos, func(x Repo) string { return x.ID }, &r)
+	credentialSourceIDs := collect("credential_source", c.CredentialSources, func(x CredentialSource) string { return x.ID }, &r)
 	runtimeIDs := collect("agent_runtime", c.AgentRuntimes, func(x AgentRuntime) string { return x.ID }, &r)
 	extensionIDs := collect("harness_extension", c.HarnessExtensions, func(x HarnessExtension) string { return x.ID }, &r)
 	integrationIDs := collect("integration", c.Integrations, func(x Integration) string { return x.ID }, &r)
@@ -82,6 +84,10 @@ func Validate(c *Catalog) ValidationResult {
 	dataIDs := collect("data_source", c.DataSources, func(x DataSource) string { return x.ID }, &r)
 	probeIDs := collect("credential_probe", c.CredentialProbes, func(x CredentialProbe) string { return x.ID }, &r)
 	_ = repoIDs
+	credentialSources := make(map[string]CredentialSource, len(c.CredentialSources))
+	for _, source := range c.CredentialSources {
+		credentialSources[source.ID] = source
+	}
 
 	for _, h := range c.Hosts {
 		if h.Hostname == "" {
@@ -101,7 +107,22 @@ func Validate(c *Catalog) ValidationResult {
 			r.err("repo", repo.ID, "path is required")
 		}
 		checkAllowed(&r, "repo", repo.ID, "update_policy", repo.UpdatePolicy, allowedRepoPolicies)
+		checkRef(&r, "repo", repo.ID, "auth_ref", repo.AuthRef, credentialSourceIDs)
+		if repo.AuthRef != "" {
+			source := credentialSources[repo.AuthRef]
+			if source.Type == "github_token_env" && !strings.HasPrefix(repo.Remote, "https://") {
+				r.err("repo", repo.ID, "github_token_env auth_ref requires an https remote")
+			}
+		}
 		checkTargets(&r, c, hostIDs, "repo", repo.ID, repo.Targets)
+	}
+	for _, source := range c.CredentialSources {
+		checkAllowed(&r, "credential_source", source.ID, "type", source.Type, allowedCredentialSourceTypes)
+		checkAllowed(&r, "credential_source", source.ID, "status", source.Status, allowedStatuses)
+		if source.Env == "" {
+			r.err("credential_source", source.ID, "env is required")
+		}
+		checkTargets(&r, c, hostIDs, "credential_source", source.ID, source.Targets)
 	}
 	for _, rt := range c.AgentRuntimes {
 		checkAllowed(&r, "agent_runtime", rt.ID, "type", rt.Type, allowedRuntimeTypes)
@@ -208,6 +229,9 @@ func Validate(c *Catalog) ValidationResult {
 		}
 		if (probe.Type == "file_exists" || probe.Type == "path_exists") && probe.Path == "" {
 			r.err("credential_probe", probe.ID, probe.Type+" probe requires path")
+		}
+		if probe.Type == "env" && probe.Env == "" {
+			r.err("credential_probe", probe.ID, "env probe requires env")
 		}
 		checkRef(&r, "credential_probe", probe.ID, "integration_ref", probe.IntegrationRef, integrationIDs)
 		checkRef(&r, "credential_probe", probe.ID, "data_source_ref", probe.DataSourceRef, dataIDs)

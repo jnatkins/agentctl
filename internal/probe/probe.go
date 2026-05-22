@@ -44,6 +44,11 @@ func runOne(p catalog.CredentialProbe, live bool) Result {
 			return Result{ID: p.ID, Type: p.Type, Status: "fail", Evidence: err.Error()}
 		}
 		return Result{ID: p.ID, Type: p.Type, Status: "ok", Evidence: path}
+	case "env":
+		if os.Getenv(p.Env) == "" {
+			return Result{ID: p.ID, Type: p.Type, Status: "fail", Evidence: p.Env + " is not set"}
+		}
+		return Result{ID: p.ID, Type: p.Type, Status: "ok", Evidence: p.Env + " is set"}
 	case "command":
 		if !live {
 			return Result{ID: p.ID, Type: p.Type, Status: "skipped", Evidence: "command probes require --live-probes"}

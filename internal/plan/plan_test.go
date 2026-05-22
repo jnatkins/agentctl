@@ -120,6 +120,44 @@ func TestApplyInstallsHarnessExtensionsAndStateStores(t *testing.T) {
 	}
 }
 
+func TestApplyInstallsCLIWrappersAsSymlinks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	source := filepath.Join(home, "repo", "bin")
+	if err := os.MkdirAll(source, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wrapper := filepath.Join(source, "gmail")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dest, "gmail"), []byte("old copied wrapper\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &catalog.Catalog{
+		Version:      1,
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		HarnessExtensions: []catalog.HarnessExtension{{
+			ID: "wrappers", Type: "cli-wrappers", Status: "active", Source: source, Path: "~/.local/bin", Targets: []string{"all"},
+		}},
+	}
+	if _, err := Apply(c, target.Selector{TargetGroups: []string{"all"}}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	targetPath, err := os.Readlink(filepath.Join(dest, "gmail"))
+	if err != nil {
+		t.Fatalf("expected wrapper symlink: %v", err)
+	}
+	if targetPath != wrapper {
+		t.Fatalf("symlink target = %q, want %q", targetPath, wrapper)
+	}
+}
+
 func TestApplyCreatesHarnessConfigAndGeneratedSkillManifest(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -157,5 +195,57 @@ func TestApplyCreatesHarnessConfigAndGeneratedSkillManifest(t *testing.T) {
 	}
 	if manifest["status"] != "ok" || manifest["installed_by"] != "agentctl" {
 		t.Fatalf("manifest = %#v", manifest)
+	}
+}
+
+func TestBuildReportsMissingCredentialSourceEnv(t *testing.T) {
+	t.Setenv("AGENTCTL_TEST_GITHUB_TOKEN", "")
+	missing := filepath.Join(t.TempDir(), "repo")
+	c := &catalog.Catalog{
+		Version:      1,
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		CredentialSources: []catalog.CredentialSource{{
+			ID: "github", Type: "github_token_env", Env: "AGENTCTL_TEST_GITHUB_TOKEN", Targets: []string{"all"},
+		}},
+		Repos: []catalog.Repo{{
+			ID: "repo", Remote: "https://github.com/example/private.git", Path: missing, UpdatePolicy: "fast-forward-only", AuthRef: "github", Targets: []string{"all"},
+		}},
+	}
+	p, err := Build(c, target.Selector{TargetGroups: []string{"all"}})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	found := false
+	for _, change := range p.Changes {
+		if change.Resource == "credential_source" && change.ID == "github" && change.Risk == "high" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected missing credential source env in plan, got %#v", p.Changes)
+	}
+}
+
+func TestApplyRepoRequiresCredentialSourceEnv(t *testing.T) {
+	t.Setenv("AGENTCTL_TEST_GITHUB_TOKEN", "")
+	missing := filepath.Join(t.TempDir(), "repo")
+	c := &catalog.Catalog{
+		Version:      1,
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		CredentialSources: []catalog.CredentialSource{{
+			ID: "github", Type: "github_token_env", Env: "AGENTCTL_TEST_GITHUB_TOKEN", Targets: []string{"all"},
+		}},
+		Repos: []catalog.Repo{{
+			ID: "repo", Remote: "https://github.com/example/private.git", Path: missing, UpdatePolicy: "fast-forward-only", AuthRef: "github", Targets: []string{"all"},
+		}},
+	}
+	changes, err := Apply(c, target.Selector{TargetGroups: []string{"all"}})
+	if err == nil {
+		t.Fatalf("expected apply error")
+	}
+	if len(changes) != 1 || changes[0].Resource != "repo" || changes[0].Risk != "high" {
+		t.Fatalf("changes = %#v", changes)
 	}
 }

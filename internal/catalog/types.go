@@ -7,6 +7,7 @@ type Catalog struct {
 
 	Hosts             []Host             `toml:"hosts"`
 	Repos             []Repo             `toml:"repos"`
+	CredentialSources []CredentialSource `toml:"credential_sources"`
 	AgentRuntimes     []AgentRuntime     `toml:"agent_runtimes"`
 	HarnessConfigs    []HarnessConfig    `toml:"harness_configs"`
 	HarnessExtensions []HarnessExtension `toml:"harness_extensions"`
@@ -37,10 +38,22 @@ type Repo struct {
 	Path         string   `toml:"path"`
 	Branch       string   `toml:"branch"`
 	UpdatePolicy string   `toml:"update_policy"`
+	AuthRef      string   `toml:"auth_ref"`
 	Targets      []string `toml:"targets"`
 	Required     bool     `toml:"required"`
 	Notes        string   `toml:"notes"`
 	sourceDir    string
+}
+
+type CredentialSource struct {
+	ID        string   `toml:"id"`
+	Type      string   `toml:"type"`
+	Status    string   `toml:"status"`
+	Env       string   `toml:"env"`
+	Username  string   `toml:"username"`
+	Targets   []string `toml:"targets"`
+	Notes     string   `toml:"notes"`
+	sourceDir string
 }
 
 type AgentRuntime struct {
@@ -200,6 +213,7 @@ type CredentialProbe struct {
 	Command        string   `toml:"command"`
 	Args           []string `toml:"args"`
 	Path           string   `toml:"path"`
+	Env            string   `toml:"env"`
 	IntegrationRef string   `toml:"integration_ref"`
 	DataSourceRef  string   `toml:"data_source_ref"`
 	Targets        []string `toml:"targets"`

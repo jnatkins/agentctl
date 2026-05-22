@@ -102,6 +102,9 @@ func stampSource(c *Catalog, sourceDir string) {
 	for i := range c.Repos {
 		c.Repos[i].sourceDir = sourceDir
 	}
+	for i := range c.CredentialSources {
+		c.CredentialSources[i].sourceDir = sourceDir
+	}
 	for i := range c.AgentRuntimes {
 		c.AgentRuntimes[i].sourceDir = sourceDir
 	}
@@ -154,6 +157,7 @@ func mergeCatalog(dst, src *Catalog, path string) error {
 	}
 	dst.Hosts = append(dst.Hosts, src.Hosts...)
 	dst.Repos = append(dst.Repos, src.Repos...)
+	dst.CredentialSources = append(dst.CredentialSources, src.CredentialSources...)
 	dst.AgentRuntimes = append(dst.AgentRuntimes, src.AgentRuntimes...)
 	dst.HarnessConfigs = append(dst.HarnessConfigs, src.HarnessConfigs...)
 	dst.HarnessExtensions = append(dst.HarnessExtensions, src.HarnessExtensions...)

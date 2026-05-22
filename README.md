@@ -13,7 +13,7 @@ This is a V1 foundation. It is macOS-first, Linux-shaped, and local-state-only:
 
 - validates strict TOML catalogs
 - models agent workloads, integrations, skills, repos, services, state stores,
-  data sources, and credential probes
+  data sources, credential sources, and credential probes
 - renders Codex scheduled workloads, Claude MCP config, and launchd service
   wrappers
 - plans local changes before applying them
@@ -23,6 +23,10 @@ This is a V1 foundation. It is macOS-first, Linux-shaped, and local-state-only:
 External SaaS systems are check-only in V1. `agentctl` does not create Slack
 apps, Notion databases, hosted connectors, OAuth clients, SSH keys, or tailnet
 inventory.
+
+Private repo bootstrap follows the same boundary: catalogs may reference a
+`credential_source`, but secret values come from the invoking environment. V1
+supports `github_token_env` for HTTPS GitHub clones and pulls.
 
 ## Install From Source
 

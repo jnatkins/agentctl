@@ -20,12 +20,21 @@ id = "claude"
 type = "claude"
 status = "active"
 
+[[credential_sources]]
+id = "github-agent-repos"
+type = "github_token_env"
+env = "AGENTCTL_GITHUB_TOKEN"
+username = "x-access-token"
+targets = ["all-agent-boxes"]
+notes = "Read-only GitHub token for private repo bootstrap; token value stays outside the catalog."
+
 [[repos]]
 id = "agent-workbench"
-remote = "git@github.com:jnatkins/agent-workbench.git"
+remote = "https://github.com/jnatkins/agent-workbench.git"
 path = "~/dev/agent-workbench"
 branch = "main"
 update_policy = "fast-forward-only"
+auth_ref = "github-agent-repos"
 targets = ["all-agent-boxes"]
 
 [[skill_packs]]
@@ -51,6 +60,14 @@ targets = ["all-agent-boxes"]
 id = "playwright-mcp-installed"
 type = "fake"
 description = "Fake probe used by example tests."
+targets = ["all-agent-boxes"]
+
+[[credential_probes]]
+id = "github-agent-repos-token"
+type = "env"
+status = "disabled"
+env = "AGENTCTL_GITHUB_TOKEN"
+description = "Checks that private GitHub repo bootstrap credentials are present."
 targets = ["all-agent-boxes"]
 
 [[data_sources]]

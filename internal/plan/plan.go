@@ -33,19 +33,27 @@ type Plan struct {
 
 func Build(c *catalog.Catalog, selector target.Selector) (Plan, error) {
 	var p Plan
+	credentialSources := matchingCredentialSources(c, selector)
+	for _, source := range c.CredentialSources {
+		if !target.Matches(source.Targets, c, selector) || !isActive(source.Status) {
+			continue
+		}
+		p.Changes = append(p.Changes, planCredentialSource(source))
+	}
 	for _, repo := range c.Repos {
 		if !target.Matches(repo.Targets, c, selector) {
 			continue
 		}
 		path := pathutil.Expand(repo.Path)
+		authReason := repoAuthPlanReason(repo, credentialSources)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
-			p.Changes = append(p.Changes, Change{Action: "create", Resource: "repo", ID: repo.ID, Path: path, Risk: "medium", Reason: "checkout is missing"})
+			p.Changes = append(p.Changes, Change{Action: "create", Resource: "repo", ID: repo.ID, Path: path, Risk: repoRisk("medium", authReason), Reason: withAuthReason("checkout is missing", authReason)})
 		} else if err != nil {
 			p.Changes = append(p.Changes, Change{Action: "check", Resource: "repo", ID: repo.ID, Path: path, Risk: "medium", Reason: err.Error()})
 		} else if repo.UpdatePolicy == "fast-forward-only" {
-			p.Changes = append(p.Changes, Change{Action: "update", Resource: "repo", ID: repo.ID, Path: path, Risk: "medium", Reason: "fast-forward-only policy"})
+			p.Changes = append(p.Changes, Change{Action: "update", Resource: "repo", ID: repo.ID, Path: path, Risk: repoRisk("medium", authReason), Reason: withAuthReason("fast-forward-only policy", authReason)})
 		} else {
-			p.Changes = append(p.Changes, Change{Action: "check", Resource: "repo", ID: repo.ID, Path: path, Risk: "low", Reason: "repo exists"})
+			p.Changes = append(p.Changes, Change{Action: "check", Resource: "repo", ID: repo.ID, Path: path, Risk: repoRisk("low", authReason), Reason: withAuthReason("repo exists", authReason)})
 		}
 	}
 	for _, store := range c.StateStores {
@@ -106,11 +114,12 @@ func Build(c *catalog.Catalog, selector target.Selector) (Plan, error) {
 
 func Apply(c *catalog.Catalog, selector target.Selector) ([]Change, error) {
 	var changes []Change
+	credentialSources := matchingCredentialSources(c, selector)
 	for _, repo := range c.Repos {
 		if !target.Matches(repo.Targets, c, selector) || repo.UpdatePolicy == "check-only" || repo.UpdatePolicy == "manual" {
 			continue
 		}
-		change, err := applyRepo(repo)
+		change, err := applyRepo(repo, credentialSources)
 		changes = append(changes, change)
 		if err != nil {
 			return changes, err
@@ -173,16 +182,19 @@ func Apply(c *catalog.Catalog, selector target.Selector) ([]Change, error) {
 	return changes, nil
 }
 
-func applyRepo(repo catalog.Repo) (Change, error) {
+func applyRepo(repo catalog.Repo, credentialSources map[string]catalog.CredentialSource) (Change, error) {
 	path := pathutil.Expand(repo.Path)
+	credentialSource, err := repoCredentialSource(repo, credentialSources)
+	if err != nil {
+		return Change{Action: "check", Resource: "repo", ID: repo.ID, Path: path, Risk: "high", Reason: err.Error()}, err
+	}
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		args := []string{"clone"}
 		if repo.Branch != "" {
 			args = append(args, "--branch", repo.Branch)
 		}
 		args = append(args, repo.Remote, path)
-		cmd := exec.Command("git", args...)
-		out, err := cmd.CombinedOutput()
+		out, err := runGit(credentialSource, args...)
 		change := Change{Action: "create", Resource: "repo", ID: repo.ID, Path: path, Risk: "medium", Reason: strings.TrimSpace(string(out))}
 		if err != nil {
 			return change, fmt.Errorf("clone repo %s: %w", repo.ID, err)
@@ -190,8 +202,7 @@ func applyRepo(repo catalog.Repo) (Change, error) {
 		return change, nil
 	}
 	if repo.UpdatePolicy == "fast-forward-only" {
-		cmd := exec.Command("git", "-C", path, "pull", "--ff-only")
-		out, err := cmd.CombinedOutput()
+		out, err := runGit(credentialSource, "-C", path, "pull", "--ff-only")
 		change := Change{Action: "update", Resource: "repo", ID: repo.ID, Path: path, Risk: "medium", Reason: strings.TrimSpace(string(out))}
 		if err != nil {
 			return change, fmt.Errorf("update repo %s: %w", repo.ID, err)
@@ -199,6 +210,127 @@ func applyRepo(repo catalog.Repo) (Change, error) {
 		return change, nil
 	}
 	return Change{Action: "check", Resource: "repo", ID: repo.ID, Path: path, Risk: "low", Reason: "repo exists"}, nil
+}
+
+func matchingCredentialSources(c *catalog.Catalog, selector target.Selector) map[string]catalog.CredentialSource {
+	sources := make(map[string]catalog.CredentialSource, len(c.CredentialSources))
+	for _, source := range c.CredentialSources {
+		if target.Matches(source.Targets, c, selector) && isActive(source.Status) {
+			sources[source.ID] = source
+		}
+	}
+	return sources
+}
+
+func planCredentialSource(source catalog.CredentialSource) Change {
+	if os.Getenv(source.Env) == "" {
+		return Change{Action: "check", Resource: "credential_source", ID: source.ID, Risk: "high", Reason: source.Env + " is not set"}
+	}
+	return Change{Action: "check", Resource: "credential_source", ID: source.ID, Risk: "low", Reason: source.Env + " is set"}
+}
+
+func repoAuthPlanReason(repo catalog.Repo, credentialSources map[string]catalog.CredentialSource) string {
+	if repo.AuthRef == "" {
+		return ""
+	}
+	source, ok := credentialSources[repo.AuthRef]
+	if !ok {
+		return "auth source " + repo.AuthRef + " is not targeted or active"
+	}
+	if os.Getenv(source.Env) == "" {
+		return "auth env " + source.Env + " is not set"
+	}
+	return "auth env " + source.Env + " is set"
+}
+
+func withAuthReason(base, auth string) string {
+	if auth == "" {
+		return base
+	}
+	return base + "; " + auth
+}
+
+func repoRisk(base, auth string) string {
+	if strings.Contains(auth, "not set") || strings.Contains(auth, "not targeted") {
+		return "high"
+	}
+	return base
+}
+
+func repoCredentialSource(repo catalog.Repo, credentialSources map[string]catalog.CredentialSource) (*catalog.CredentialSource, error) {
+	if repo.AuthRef == "" {
+		return nil, nil
+	}
+	source, ok := credentialSources[repo.AuthRef]
+	if !ok {
+		return nil, fmt.Errorf("auth source %q is not targeted or active", repo.AuthRef)
+	}
+	if source.Type != "github_token_env" {
+		return nil, fmt.Errorf("unsupported repo auth source type %q", source.Type)
+	}
+	if os.Getenv(source.Env) == "" {
+		return nil, fmt.Errorf("credential env %s is not set", source.Env)
+	}
+	return &source, nil
+}
+
+func runGit(credentialSource *catalog.CredentialSource, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cleanup := func() {}
+	if credentialSource != nil {
+		extra, done, err := gitCredentialEnv(*credentialSource)
+		if err != nil {
+			return nil, err
+		}
+		cleanup = done
+		env = append(env, extra...)
+	}
+	defer cleanup()
+	cmd.Env = env
+	return cmd.CombinedOutput()
+}
+
+func gitCredentialEnv(source catalog.CredentialSource) ([]string, func(), error) {
+	token := os.Getenv(source.Env)
+	if token == "" {
+		return nil, nil, fmt.Errorf("credential env %s is not set", source.Env)
+	}
+	username := source.Username
+	if username == "" {
+		username = "x-access-token"
+	}
+	file, err := os.CreateTemp("", "agentctl-git-askpass-*")
+	if err != nil {
+		return nil, nil, err
+	}
+	path := file.Name()
+	script := `#!/bin/sh
+case "$1" in
+  *Username*|*username*) printf '%s\n' "$AGENTCTL_GIT_USERNAME" ;;
+  *Password*|*password*) printf '%s\n' "$AGENTCTL_GIT_PASSWORD" ;;
+  *) printf '\n' ;;
+esac
+`
+	if _, err := file.WriteString(script); err != nil {
+		file.Close()
+		os.Remove(path)
+		return nil, nil, err
+	}
+	if err := file.Close(); err != nil {
+		os.Remove(path)
+		return nil, nil, err
+	}
+	if err := os.Chmod(path, 0o700); err != nil {
+		os.Remove(path)
+		return nil, nil, err
+	}
+	env := []string{
+		"GIT_ASKPASS=" + path,
+		"AGENTCTL_GIT_USERNAME=" + username,
+		"AGENTCTL_GIT_PASSWORD=" + token,
+	}
+	return env, func() { os.Remove(path) }, nil
 }
 
 func isActive(status string) bool {
@@ -311,6 +443,9 @@ func planHarnessExtension(ext catalog.HarnessExtension) Change {
 	if !info.IsDir() {
 		return planManagedFile("harness_extension", ext.ID, source, dest)
 	}
+	if ext.Type == "cli-wrappers" {
+		return planSymlinkedDirEntries("harness_extension", ext.ID, source, dest)
+	}
 	if _, err := os.Stat(dest); os.IsNotExist(err) {
 		return Change{Action: "create", Resource: "harness_extension", ID: ext.ID, Path: dest, Risk: "medium", Reason: "install path is missing"}
 	} else if err != nil {
@@ -334,7 +469,11 @@ func applyHarnessExtension(ext catalog.HarnessExtension) (Change, error) {
 	if err != nil {
 		return planned, err
 	}
-	if info.IsDir() {
+	if info.IsDir() && ext.Type == "cli-wrappers" {
+		if err := symlinkDirEntries(source, dest); err != nil {
+			return Change{Action: planned.Action, Resource: "harness_extension", ID: ext.ID, Path: dest, Risk: "medium", Reason: err.Error()}, err
+		}
+	} else if info.IsDir() {
 		if err := copyDirContents(source, dest); err != nil {
 			return Change{Action: planned.Action, Resource: "harness_extension", ID: ext.ID, Path: dest, Risk: "medium", Reason: err.Error()}, err
 		}
@@ -402,6 +541,52 @@ func planManagedFile(resource, id, source, dest string) Change {
 	}
 	if !same {
 		return Change{Action: "update", Resource: resource, ID: id, Path: dest, Risk: "medium", Reason: "managed file differs"}
+	}
+	return Change{Action: "no-op", Resource: resource, ID: id, Path: dest, Risk: "low", Reason: "already current"}
+}
+
+func planSymlinkedDirEntries(resource, id, source, dest string) Change {
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		return Change{Action: "check", Resource: resource, ID: id, Path: dest, Risk: "medium", Reason: err.Error()}
+	}
+	if _, err := os.Stat(dest); os.IsNotExist(err) {
+		return Change{Action: "create", Resource: resource, ID: id, Path: dest, Risk: "medium", Reason: "install path is missing"}
+	} else if err != nil {
+		return Change{Action: "check", Resource: resource, ID: id, Path: dest, Risk: "medium", Reason: err.Error()}
+	}
+	changed := 0
+	managed := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		managed++
+		sourcePath := filepath.Join(source, entry.Name())
+		destPath := filepath.Join(dest, entry.Name())
+		target, err := os.Readlink(destPath)
+		if err == nil {
+			if target != sourcePath {
+				changed++
+			}
+			continue
+		}
+		if os.IsNotExist(err) {
+			changed++
+			continue
+		}
+		if _, statErr := os.Lstat(destPath); statErr == nil {
+			changed++
+			continue
+		} else if !os.IsNotExist(statErr) {
+			return Change{Action: "check", Resource: resource, ID: id, Path: dest, Risk: "medium", Reason: statErr.Error()}
+		}
+	}
+	if managed == 0 {
+		return Change{Action: "check", Resource: resource, ID: id, Path: dest, Risk: "low", Reason: "no wrapper files found"}
+	}
+	if changed > 0 {
+		return Change{Action: "update", Resource: resource, ID: id, Path: dest, Risk: "medium", Reason: fmt.Sprintf("%d wrapper symlink(s) missing or changed", changed)}
 	}
 	return Change{Action: "no-op", Resource: resource, ID: id, Path: dest, Risk: "low", Reason: "already current"}
 }
@@ -653,6 +838,27 @@ func copyDirContents(source, dest string) error {
 	})
 }
 
+func symlinkDirEntries(source, dest string) error {
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		sourcePath := filepath.Join(source, entry.Name())
+		destPath := filepath.Join(dest, entry.Name())
+		if err := installSymlink(sourcePath, destPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func copyFile(source, dest string, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
@@ -675,6 +881,24 @@ func copyFile(source, dest string, mode os.FileMode) error {
 		return err
 	}
 	if err := os.Chmod(tmp, mode); err != nil {
+		return err
+	}
+	return os.Rename(tmp, dest)
+}
+
+func installSymlink(source, dest string) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	tmp := dest + ".tmp"
+	if err := os.RemoveAll(tmp); err != nil {
+		return err
+	}
+	if err := os.Symlink(source, tmp); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(dest); err != nil {
+		os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, dest)

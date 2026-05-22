@@ -186,3 +186,66 @@ integration_refs = ["missing"]
 		t.Fatalf("expected missing ref diagnostic, got %#v", result.Diagnostics)
 	}
 }
+
+func TestRepoCredentialSourceValidation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agentctl.toml")
+	if err := os.WriteFile(path, []byte(`
+version = 1
+
+[target_groups]
+all = "all boxes"
+
+[[hosts]]
+id = "local"
+hostname = "localhost"
+target_groups = ["all"]
+
+[[credential_sources]]
+id = "github"
+type = "github_token_env"
+env = "AGENTCTL_GITHUB_TOKEN"
+targets = ["all"]
+
+[[repos]]
+id = "private"
+remote = "https://github.com/example/private.git"
+path = "~/dev/private"
+auth_ref = "github"
+targets = ["all"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := Load([]string{path})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	result := Validate(c)
+	if result.HasErrors() {
+		t.Fatalf("validation errors: %#v", result.Diagnostics)
+	}
+}
+
+func TestRepoCredentialSourceUnknownRefFails(t *testing.T) {
+	c := &Catalog{
+		Version:      1,
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		Repos: []Repo{{
+			ID: "private", Remote: "https://github.com/example/private.git", Path: "~/dev/private", AuthRef: "missing", Targets: []string{"all"},
+		}},
+	}
+	result := Validate(c)
+	if !result.HasErrors() {
+		t.Fatalf("expected validation error")
+	}
+	found := false
+	for _, d := range result.Diagnostics {
+		if strings.Contains(d.Message, "auth_ref") && strings.Contains(d.Message, "missing") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected unknown auth_ref diagnostic, got %#v", result.Diagnostics)
+	}
+}
