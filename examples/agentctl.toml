@@ -1,0 +1,94 @@
+version = 1
+
+[target_groups]
+all-agent-boxes = "Every standard local agent box."
+coordinator = "Box that runs fleet/coordinator jobs."
+
+[[hosts]]
+id = "local"
+hostname = "localhost"
+aliases = ["local"]
+target_groups = ["all-agent-boxes", "coordinator"]
+
+[[agent_runtimes]]
+id = "codex"
+type = "codex"
+status = "active"
+
+[[agent_runtimes]]
+id = "claude"
+type = "claude"
+status = "active"
+
+[[repos]]
+id = "agent-workbench"
+remote = "git@github.com:jnatkins/agent-workbench.git"
+path = "~/dev/agent-workbench"
+branch = "main"
+update_policy = "fast-forward-only"
+targets = ["all-agent-boxes"]
+
+[[integrations]]
+id = "playwright"
+type = "mcp_stdio"
+description = "Browser automation MCP server."
+command = "npx"
+args = ["-y", "@playwright/mcp"]
+harnesses = ["claude"]
+allowed_tools = ["mcp__playwright__*"]
+targets = ["all-agent-boxes"]
+
+[[credential_probes]]
+id = "playwright-mcp-installed"
+type = "fake"
+description = "Fake probe used by example tests."
+targets = ["all-agent-boxes"]
+
+[[data_sources]]
+id = "local-browser"
+type = "browser"
+description = "Local browser automation surface."
+
+[[state_stores]]
+id = "local-agent-queue"
+type = "sqlite"
+path = "~/.local/share/agentctl/queues/agents.sqlite3"
+targets = ["all-agent-boxes"]
+
+[[agent_workloads]]
+id = "agent-core-repo-update"
+name = "Agent Core Repo Update"
+owner = "agent-ops"
+kind = "schedule"
+status = "active"
+schedule = "FREQ=DAILY;BYHOUR=6;BYMINUTE=15;BYSECOND=0"
+timezone = "local"
+targets = ["all-agent-boxes"]
+harnesses = ["codex"]
+cwd = "~/dev/agent-workbench"
+prompt = "Run the agent core repo update workflow."
+model = "gpt-5.4"
+reasoning = "low"
+tags = ["agent-ops", "bootstrap"]
+
+[[agent_workloads]]
+id = "queue-worker"
+name = "Example Queue Worker"
+owner = "agent-ops"
+kind = "queue"
+status = "active"
+targets = ["coordinator"]
+command = "/usr/local/bin/agent-worker"
+args = ["--queue", "local-agent-queue"]
+state_store_refs = ["local-agent-queue"]
+restart_policy = "always"
+log_path = "~/.local/state/agentctl/queue-worker.log"
+
+[[aux_services]]
+id = "natty-ops"
+type = "mcp_gateway"
+status = "planned"
+targets = ["coordinator"]
+command = "/usr/local/bin/natty-ops"
+args = ["serve"]
+restart_policy = "always"
