@@ -168,7 +168,7 @@ func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 		if !isActive(w.Status) || !target.Matches(w.Targets, c, opts.Selector) || (w.Kind != "daemon" && w.Kind != "queue") {
 			continue
 		}
-		content := launchdPlist("dev.agentctl.workload."+slug(w.ID), w.DisplayName(), w.Command, w.Args, w.CWD, w.LogPath, w.RestartPolicy)
+		content := launchdPlist("dev.agentctl.workload."+slug(w.ID), w.DisplayName(), w.Command, w.Args, w.CWD, w.LogPath, w.RestartPolicy, "")
 		files = append(files, File{
 			Path:    renderPath(opts, "launchd", "dev.agentctl.workload."+slug(w.ID)+".plist"),
 			Mode:    0o644,
@@ -180,7 +180,7 @@ func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 		if !isActive(svc.Status) || !target.Matches(svc.Targets, c, opts.Selector) || svc.Command == "" {
 			continue
 		}
-		content := launchdPlist("dev.agentctl.service."+slug(svc.ID), svc.ID, svc.Command, svc.Args, svc.CWD, svc.LogPath, svc.RestartPolicy)
+		content := launchdPlist("dev.agentctl.service."+slug(svc.ID), svc.ID, svc.Command, svc.Args, svc.CWD, svc.LogPath, svc.RestartPolicy, svc.Schedule)
 		files = append(files, File{
 			Path:    renderPath(opts, "launchd", "dev.agentctl.service."+slug(svc.ID)+".plist"),
 			Mode:    0o644,
@@ -200,7 +200,7 @@ func renderPath(opts Options, dir, name string) string {
 	return filepath.Join(opts.OutputDir, dir, name)
 }
 
-func launchdPlist(label, name, command string, args []string, cwd, logPath, restart string) []byte {
+func launchdPlist(label, name, command string, args []string, cwd, logPath, restart, schedule string) []byte {
 	var b bytes.Buffer
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
 	b.WriteString(`<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">` + "\n")
@@ -211,8 +211,13 @@ func launchdPlist(label, name, command string, args []string, cwd, logPath, rest
 	if cwd != "" {
 		writePlistKeyString(&b, "WorkingDirectory", pathutil.Expand(cwd))
 	}
-	keepAlive := restart == "always" || restart == ""
-	writePlistKeyBool(&b, "KeepAlive", keepAlive)
+	if interval, ok := parseStartInterval(schedule); ok {
+		// Interval-scheduled service: run every N seconds, do not keep alive.
+		writePlistKeyInteger(&b, "StartInterval", interval)
+		writePlistKeyBool(&b, "KeepAlive", false)
+	} else {
+		writePlistKeyBool(&b, "KeepAlive", restart == "always" || restart == "")
+	}
 	writePlistKeyBool(&b, "RunAtLoad", true)
 	if logPath != "" {
 		expanded := pathutil.Expand(logPath)
@@ -222,6 +227,24 @@ func launchdPlist(label, name, command string, args []string, cwd, logPath, rest
 	_ = name
 	b.WriteString("</dict>\n</plist>\n")
 	return b.Bytes()
+}
+
+// parseStartInterval extracts the seconds from a "StartInterval=<n>" schedule.
+// Returns false for any other (or empty) schedule form.
+func parseStartInterval(schedule string) (int, bool) {
+	const prefix = "StartInterval="
+	if !strings.HasPrefix(schedule, prefix) {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(schedule[len(prefix):]))
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func writePlistKeyInteger(b *bytes.Buffer, key string, value int) {
+	fmt.Fprintf(b, "  <key>%s</key>\n  <integer>%d</integer>\n", xmlEscape(key), value)
 }
 
 func workloadPrompt(w catalog.AgentWorkload) (string, error) {
