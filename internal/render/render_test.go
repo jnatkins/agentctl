@@ -128,3 +128,27 @@ func TestLaunchdSkipsPlannedServices(t *testing.T) {
 		t.Fatalf("files len = %d, want 0", len(files))
 	}
 }
+
+func TestLaunchdRenderStartInterval(t *testing.T) {
+	c := &catalog.Catalog{
+		AuxServices: []catalog.AuxService{{
+			ID: "shmem-drain", Type: "launchd_schedule", Status: "active",
+			Command: "~/x/run.sh", Schedule: "StartInterval=300",
+			RestartPolicy: "on_interval", Targets: []string{"all"},
+		}},
+	}
+	files, err := Launchd(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"})
+	if err != nil {
+		t.Fatalf("Launchd() error = %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("want 1 file, got %d", len(files))
+	}
+	s := string(files[0].Content)
+	if !strings.Contains(s, "<key>StartInterval</key>") || !strings.Contains(s, "<integer>300</integer>") {
+		t.Fatalf("missing StartInterval:\n%s", s)
+	}
+	if !strings.Contains(s, "<key>KeepAlive</key>\n  <false/>") {
+		t.Fatalf("scheduled service must set KeepAlive false:\n%s", s)
+	}
+}

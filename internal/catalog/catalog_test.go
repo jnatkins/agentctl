@@ -249,3 +249,45 @@ func TestRepoCredentialSourceUnknownRefFails(t *testing.T) {
 		t.Fatalf("expected unknown auth_ref diagnostic, got %#v", result.Diagnostics)
 	}
 }
+
+func TestAuxServiceScheduleDecodes(t *testing.T) {
+	doc := `
+version = 1
+[[hosts]]
+id = "h"
+hostname = "h"
+target_groups = ["all"]
+[[aux_services]]
+id = "shmem-drain"
+type = "launchd_schedule"
+status = "active"
+command = "~/x/run.sh"
+schedule = "StartInterval=300"
+restart_policy = "on_interval"
+targets = ["all"]
+`
+	dir := t.TempDir()
+	p := filepath.Join(dir, "c.toml")
+	if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := Load([]string{p})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if c.AuxServices[0].Schedule != "StartInterval=300" {
+		t.Fatalf("Schedule = %q, want StartInterval=300", c.AuxServices[0].Schedule)
+	}
+}
+
+func TestLaunchdScheduleTypeAllowed(t *testing.T) {
+	c := &Catalog{
+		Version:      1,
+		TargetGroups: map[string]string{"all": "test group"},
+		Hosts:        []Host{{ID: "h", Hostname: "h", TargetGroups: []string{"all"}}},
+		AuxServices:  []AuxService{{ID: "d", Type: "launchd_schedule", Status: "active", Command: "x", Schedule: "StartInterval=300", Targets: []string{"all"}}},
+	}
+	if r := Validate(c); r.HasErrors() {
+		t.Fatalf("unexpected validation errors for launchd_schedule aux type: %+v", r.Diagnostics)
+	}
+}

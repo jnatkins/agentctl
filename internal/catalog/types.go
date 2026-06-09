@@ -177,6 +177,7 @@ type AuxService struct {
 	LogPath        string            `toml:"log_path"`
 	HealthCommand  string            `toml:"health_command"`
 	RestartPolicy  string            `toml:"restart_policy"`
+	Schedule       string            `toml:"schedule"`
 	StateStoreRefs []string          `toml:"state_store_refs"`
 	Targets        []string          `toml:"targets"`
 	Notes          string            `toml:"notes"`
