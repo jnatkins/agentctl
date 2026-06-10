@@ -215,6 +215,7 @@ type CredentialProbe struct {
 	Args           []string `toml:"args"`
 	Path           string   `toml:"path"`
 	Env            string   `toml:"env"`
+	Label          string   `toml:"label"`
 	IntegrationRef string   `toml:"integration_ref"`
 	DataSourceRef  string   `toml:"data_source_ref"`
 	Targets        []string `toml:"targets"`

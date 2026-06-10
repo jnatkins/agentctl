@@ -13,3 +13,10 @@ func TestEnvProbe(t *testing.T) {
 		t.Fatalf("status = %q, evidence = %q", result.Status, result.Evidence)
 	}
 }
+
+func TestLaunchdLoadedProbeSkippedWithoutLive(t *testing.T) {
+	result := runOne(catalog.CredentialProbe{ID: "svc", Type: "launchd_loaded", Label: "com.example.agent"}, false)
+	if result.Status != "skipped" {
+		t.Fatalf("status = %q, want skipped", result.Status)
+	}
+}

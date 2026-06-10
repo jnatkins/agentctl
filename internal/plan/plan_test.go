@@ -227,6 +227,52 @@ func TestBuildReportsMissingCredentialSourceEnv(t *testing.T) {
 	}
 }
 
+func TestApplySkillPackCleansUpLeftoverTmp(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	source := filepath.Join(home, "generated-skills")
+	if err := os.MkdirAll(filepath.Join(source, "my-skill"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "my-skill", "SKILL.md"), []byte("---\nname: my-skill\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(home, ".codex", "skills")
+	if err := os.MkdirAll(dest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a leftover .tmp from a prior crashed install.
+	leftover := filepath.Join(dest, "my-skill.tmp")
+	if err := os.MkdirAll(leftover, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(leftover, "stale.md"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := &catalog.Catalog{
+		Version:      1,
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		SkillPacks: []catalog.SkillPack{{
+			ID: "skills", Source: source, InstallPath: "~/.codex/skills", Targets: []string{"all"},
+		}},
+	}
+	if _, err := Apply(c, target.Selector{TargetGroups: []string{"all"}}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	// .tmp should be gone.
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Fatalf("expected leftover .tmp to be removed, err=%v", err)
+	}
+	// Final skill dir should contain only source files.
+	if _, err := os.Stat(filepath.Join(dest, "my-skill", "SKILL.md")); err != nil {
+		t.Fatalf("expected installed SKILL.md: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "my-skill", "stale.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale.md to be gone after atomic replace")
+	}
+}
+
 func TestApplyRepoRequiresCredentialSourceEnv(t *testing.T) {
 	t.Setenv("AGENTCTL_TEST_GITHUB_TOKEN", "")
 	missing := filepath.Join(t.TempDir(), "repo")

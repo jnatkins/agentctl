@@ -49,6 +49,25 @@ func runOne(p catalog.CredentialProbe, live bool) Result {
 			return Result{ID: p.ID, Type: p.Type, Status: "fail", Evidence: p.Env + " is not set"}
 		}
 		return Result{ID: p.ID, Type: p.Type, Status: "ok", Evidence: p.Env + " is set"}
+	case "launchd_loaded":
+		if !live {
+			return Result{ID: p.ID, Type: p.Type, Status: "skipped", Evidence: "launchd_loaded probes require --live-probes"}
+		}
+		label := p.Label
+		if label == "" {
+			label = p.Command
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "launchctl", "list", label)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() == context.DeadlineExceeded {
+			return Result{ID: p.ID, Type: p.Type, Status: "fail", Evidence: "timeout"}
+		}
+		if err != nil {
+			return Result{ID: p.ID, Type: p.Type, Status: "fail", Evidence: string(out)}
+		}
+		return Result{ID: p.ID, Type: p.Type, Status: "ok", Evidence: string(out)}
 	case "command":
 		if !live {
 			return Result{ID: p.ID, Type: p.Type, Status: "skipped", Evidence: "command probes require --live-probes"}

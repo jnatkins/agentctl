@@ -204,7 +204,10 @@ func runApply(args []string) error {
 	}
 	changes, err := plan.Apply(c, selector(opts))
 	if opts.format == "json" {
-		return printJSON(map[string]any{"warnings": warnings, "changes": changes, "error": errorString(err)})
+		if jsonErr := printJSON(map[string]any{"warnings": warnings, "changes": changes, "error": errorString(err)}); jsonErr != nil {
+			return jsonErr
+		}
+		return err
 	}
 	for _, w := range warnings {
 		fmt.Println("warning:", w)

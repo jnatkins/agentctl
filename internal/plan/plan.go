@@ -686,7 +686,21 @@ func skillDirsDiffer(skills []string, dest string) (bool, int, error) {
 
 func copySkillDirs(skills []string, dest string) error {
 	for _, skill := range skills {
-		if err := copyDirContents(skill, filepath.Join(dest, filepath.Base(skill))); err != nil {
+		destPath := filepath.Join(dest, filepath.Base(skill))
+		tmp := destPath + ".tmp"
+		if err := os.RemoveAll(tmp); err != nil {
+			return err
+		}
+		if err := copyDirContents(skill, tmp); err != nil {
+			os.RemoveAll(tmp)
+			return err
+		}
+		if err := os.RemoveAll(destPath); err != nil {
+			os.RemoveAll(tmp)
+			return err
+		}
+		if err := os.Rename(tmp, destPath); err != nil {
+			os.RemoveAll(tmp)
 			return err
 		}
 	}
