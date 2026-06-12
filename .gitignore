@@ -2,3 +2,6 @@
 .agentctl-render/
 dist/
 tmp/
+
+# compiled binary (build artifact) — do not track
+/agentctl
