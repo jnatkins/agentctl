@@ -181,7 +181,15 @@ type AuxService struct {
 	StateStoreRefs []string          `toml:"state_store_refs"`
 	Targets        []string          `toml:"targets"`
 	Notes          string            `toml:"notes"`
-	sourceDir      string
+	// Reference metadata for services whose launchd plist is maintained as a
+	// checked-in template (e.g. http daemons fsd-monitor:8767, token-custodian:8771
+	// and the skillhouse launchd_schedule jobs). Accepted by the loader so the
+	// catalog validates; render still generates the plist programmatically from
+	// Command/Schedule/LogPath, so these are documentation, not render inputs.
+	PlistTemplate string `toml:"plist_template"`
+	Port          int    `toml:"port"`
+	LogDir        string `toml:"log_dir"`
+	sourceDir     string
 }
 
 type StateStore struct {
