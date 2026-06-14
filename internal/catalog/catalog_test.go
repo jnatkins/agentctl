@@ -36,6 +36,41 @@ unknown = true
 	}
 }
 
+func TestAuxServiceTemplateFields(t *testing.T) {
+	// Regression: the live catalog registers http daemons + launchd_schedule jobs
+	// with plist_template / port / log_dir. Before these struct fields existed the
+	// strict loader rejected the whole catalog with "unknown keys", breaking
+	// agentctl check/plan/apply on every box.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agentctl.toml")
+	if err := os.WriteFile(path, []byte(`
+version = 1
+
+[[aux_services]]
+id = "fsd-monitor"
+type = "http"
+status = "active"
+command = "~/dev/agent-aux/services/fsd-monitor/run.sh"
+plist_template = "~/dev/agent-aux/infra/launchd/com.natty.fsd-monitor.plist.template"
+port = 8767
+log_dir = "~/Library/Logs/agent-aux"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := Load([]string{path})
+	if err != nil {
+		t.Fatalf("Load() error = %v (plist_template/port/log_dir must be accepted)", err)
+	}
+	if len(c.AuxServices) != 1 {
+		t.Fatalf("expected 1 aux_service, got %d", len(c.AuxServices))
+	}
+	svc := c.AuxServices[0]
+	if svc.PlistTemplate == "" || svc.Port != 8767 || svc.LogDir == "" {
+		t.Fatalf("template fields not parsed: PlistTemplate=%q Port=%d LogDir=%q",
+			svc.PlistTemplate, svc.Port, svc.LogDir)
+	}
+}
+
 func TestDiscoverCatalogPrefersAgentctlRoot(t *testing.T) {
 	dir := t.TempDir()
 	state := filepath.Join(dir, "state")
