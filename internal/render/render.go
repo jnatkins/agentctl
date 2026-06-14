@@ -165,7 +165,23 @@ func Claude(c *catalog.Catalog, opts Options) ([]File, error) {
 func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 	var files []File
 	for _, w := range c.AgentWorkloads {
-		if !isActive(w.Status) || !target.Matches(w.Targets, c, opts.Selector) || (w.Kind != "daemon" && w.Kind != "queue") {
+		if !isActive(w.Status) || !target.Matches(w.Targets, c, opts.Selector) {
+			continue
+		}
+		if w.PlistTemplate != "" {
+			installName, content, err := renderFromTemplate(w.PlistTemplate)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, File{
+				Path:    renderPath(opts, "launchd", installName),
+				Mode:    0o644,
+				Reason:  "launchd workload (from template)",
+				Content: content,
+			})
+			continue
+		}
+		if w.Kind != "daemon" && w.Kind != "queue" {
 			continue
 		}
 		content := launchdPlist("dev.agentctl.workload."+slug(w.ID), w.DisplayName(), w.Command, w.Args, w.CWD, w.LogPath, w.RestartPolicy, "")
@@ -177,7 +193,23 @@ func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 		})
 	}
 	for _, svc := range c.AuxServices {
-		if !isActive(svc.Status) || !target.Matches(svc.Targets, c, opts.Selector) || svc.Command == "" {
+		if !isActive(svc.Status) || !target.Matches(svc.Targets, c, opts.Selector) {
+			continue
+		}
+		if svc.PlistTemplate != "" {
+			installName, content, err := renderFromTemplate(svc.PlistTemplate)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, File{
+				Path:    renderPath(opts, "launchd", installName),
+				Mode:    0o644,
+				Reason:  "launchd auxiliary service (from template)",
+				Content: content,
+			})
+			continue
+		}
+		if svc.Command == "" {
 			continue
 		}
 		content := launchdPlist("dev.agentctl.service."+slug(svc.ID), svc.ID, svc.Command, svc.Args, svc.CWD, svc.LogPath, svc.RestartPolicy, svc.Schedule)
@@ -189,6 +221,41 @@ func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 		})
 	}
 	return files, nil
+}
+
+// renderFromTemplate reads a checked-in .plist.template file and substitutes
+// __REPO_ROOT__ / __USER__ placeholders, mirroring the sed-substitution in
+// services/agent-conductor/cutover.sh.
+//
+// The template is expected at <repoRoot>/infra/launchd/<basename>.
+// repoRoot is derived by stripping the trailing /infra/launchd/<file> segments.
+// Returns (installFilename, content, err) where installFilename is the plist
+// basename with ".template" stripped (e.g. "com.natty.claude.x.plist").
+func renderFromTemplate(tmplPath string) (installName string, content []byte, err error) {
+	expanded := pathutil.Expand(tmplPath)
+	raw, err := os.ReadFile(expanded)
+	if err != nil {
+		return "", nil, fmt.Errorf("renderFromTemplate: read %s: %w", expanded, err)
+	}
+
+	// Derive repoRoot by stripping /infra/launchd/<file> from the absolute path.
+	repoRoot := filepath.Dir(filepath.Dir(filepath.Dir(expanded)))
+
+	// Determine user: prefer $USER env var; fall back to home dir basename.
+	user := os.Getenv("USER")
+	if user == "" {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			user = filepath.Base(home)
+		}
+	}
+
+	replaced := strings.ReplaceAll(string(raw), "__REPO_ROOT__", repoRoot)
+	replaced = strings.ReplaceAll(replaced, "__USER__", user)
+
+	// installName = basename of tmplPath with ".template" suffix stripped.
+	base := filepath.Base(expanded)
+	installName = strings.TrimSuffix(base, ".template")
+	return installName, []byte(replaced), nil
 }
 
 func renderPath(opts Options, dir, name string) string {

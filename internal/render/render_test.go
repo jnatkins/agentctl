@@ -129,6 +129,149 @@ func TestLaunchdSkipsPlannedServices(t *testing.T) {
 	}
 }
 
+func TestRenderFromTemplateSubstitutes(t *testing.T) {
+	tmp := t.TempDir()
+	// Build tmp/infra/launchd/com.natty.claude.demo.plist.template
+	launchdDir := filepath.Join(tmp, "infra", "launchd")
+	if err := os.MkdirAll(launchdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmplContent := `<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.natty.claude.demo</string>
+  <key>ProgramArguments</key><array>
+    <string>__REPO_ROOT__/services/x.sh</string>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/Users/__USER__/Library/Logs/x.log</string>
+</dict></plist>`
+	tmplPath := filepath.Join(launchdDir, "com.natty.claude.demo.plist.template")
+	if err := os.WriteFile(tmplPath, []byte(tmplContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &catalog.Catalog{
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		AuxServices: []catalog.AuxService{{
+			ID:            "demo",
+			Status:        "active",
+			Targets:       []string{"all"},
+			PlistTemplate: tmplPath,
+		}},
+	}
+	files, err := Launchd(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"})
+	if err != nil {
+		t.Fatalf("Launchd() error = %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("want 1 file, got %d", len(files))
+	}
+	f := files[0]
+	if filepath.Base(f.Path) != "com.natty.claude.demo.plist" {
+		t.Fatalf("install filename = %q, want com.natty.claude.demo.plist", filepath.Base(f.Path))
+	}
+	content := string(f.Content)
+	if strings.Contains(content, "__REPO_ROOT__") {
+		t.Fatalf("__REPO_ROOT__ placeholder not replaced:\n%s", content)
+	}
+	if strings.Contains(content, "__USER__") {
+		t.Fatalf("__USER__ placeholder not replaced:\n%s", content)
+	}
+	if !strings.Contains(content, tmp+"/services/x.sh") {
+		t.Fatalf("repoRoot substitution wrong, want %q in:\n%s", tmp+"/services/x.sh", content)
+	}
+	user := os.Getenv("USER")
+	if user == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			user = filepath.Base(home)
+		}
+	}
+	if user == "" {
+		t.Fatal("could not determine user for assertion")
+	}
+	if !strings.Contains(content, "/Users/"+user+"/Library/Logs/x.log") {
+		t.Fatalf("user substitution wrong, want /Users/%s/... in:\n%s", user, content)
+	}
+}
+
+func TestAuxServiceWithTemplatePreferredOverGenerated(t *testing.T) {
+	tmp := t.TempDir()
+	launchdDir := filepath.Join(tmp, "infra", "launchd")
+	if err := os.MkdirAll(launchdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmplPath := filepath.Join(launchdDir, "com.natty.claude.mysvc.plist.template")
+	if err := os.WriteFile(tmplPath, []byte(`<plist><dict><key>Label</key><string>com.natty.claude.mysvc</string></dict></plist>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &catalog.Catalog{
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		AuxServices: []catalog.AuxService{{
+			ID:            "mysvc",
+			Status:        "active",
+			Targets:       []string{"all"},
+			Command:       "/usr/local/bin/mysvc",
+			PlistTemplate: tmplPath,
+		}},
+	}
+	files, err := Launchd(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"})
+	if err != nil {
+		t.Fatalf("Launchd() error = %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("want exactly 1 file, got %d: %v", len(files), func() []string {
+			var names []string
+			for _, f := range files {
+				names = append(names, filepath.Base(f.Path))
+			}
+			return names
+		}())
+	}
+	base := filepath.Base(files[0].Path)
+	if base != "com.natty.claude.mysvc.plist" {
+		t.Fatalf("filename = %q, want com.natty.claude.mysvc.plist (not dev.agentctl.service.*)", base)
+	}
+}
+
+func TestScheduledWorkloadWithTemplateRenders(t *testing.T) {
+	tmp := t.TempDir()
+	launchdDir := filepath.Join(tmp, "infra", "launchd")
+	if err := os.MkdirAll(launchdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmplPath := filepath.Join(launchdDir, "com.natty.claude.nightly-report.plist.template")
+	if err := os.WriteFile(tmplPath, []byte(`<plist><dict><key>Label</key><string>com.natty.claude.nightly-report</string></dict></plist>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &catalog.Catalog{
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		AgentWorkloads: []catalog.AgentWorkload{{
+			ID:            "nightly-report",
+			Kind:          "schedule",
+			Status:        "active",
+			Targets:       []string{"all"},
+			Schedule:      "StartCalendarInterval Hour=3 Minute=0",
+			PlistTemplate: tmplPath,
+		}},
+	}
+	files, err := Launchd(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"})
+	if err != nil {
+		t.Fatalf("Launchd() error = %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("want 1 file for schedule workload with template, got %d", len(files))
+	}
+	base := filepath.Base(files[0].Path)
+	if base != "com.natty.claude.nightly-report.plist" {
+		t.Fatalf("filename = %q, want com.natty.claude.nightly-report.plist", base)
+	}
+}
+
 func TestLaunchdRenderStartInterval(t *testing.T) {
 	c := &catalog.Catalog{
 		AuxServices: []catalog.AuxService{{
