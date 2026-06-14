@@ -158,6 +158,7 @@ type AgentWorkload struct {
 	IntegrationRefs      []string          `toml:"integration_refs"`
 	StateStoreRefs       []string          `toml:"state_store_refs"`
 	SourceRefs           []string          `toml:"source_refs"`
+	PlistTemplate        string            `toml:"plist_template"`
 	Notes                string            `toml:"notes"`
 	sourceDir            string
 }
