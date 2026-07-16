@@ -192,7 +192,7 @@ func Validate(c *Catalog) ValidationResult {
 		if w.Kind == "queue" && len(w.StateStoreRefs) == 0 && len(w.IntegrationRefs) == 0 {
 			r.err("agent_workload", w.ID, "queue workload requires state_store_refs or integration_refs")
 		}
-		if w.Kind == "schedule" && w.Command == "" && w.Prompt == "" && w.PromptFile == "" {
+		if w.Kind == "schedule" && w.Command == "" && w.RunCommand == "" && w.Prompt == "" && w.PromptFile == "" {
 			r.err("agent_workload", w.ID, "schedule workload requires command, prompt, or prompt_file")
 		}
 		checkRefs(&r, "agent_workload", w.ID, "integration_refs", w.IntegrationRefs, integrationIDs)
@@ -213,6 +213,11 @@ func Validate(c *Catalog) ValidationResult {
 		checkAllowed(&r, "state_store", ss.ID, "status", ss.Status, allowedStatuses)
 		if ss.Type != "external" && ss.Path == "" {
 			r.err("state_store", ss.ID, "non-external state_store requires path")
+		}
+		for field, mode := range map[string]string{"mode": ss.Mode, "parent_mode": ss.ParentMode} {
+			if mode != "" && !regexp.MustCompile(`^0[0-7]{3}$`).MatchString(mode) {
+				r.err("state_store", ss.ID, field+" must be a four-digit octal permission such as 0700")
+			}
 		}
 		checkTargets(&r, c, hostIDs, "state_store", ss.ID, ss.Targets)
 	}

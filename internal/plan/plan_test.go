@@ -120,6 +120,59 @@ func TestApplyInstallsHarnessExtensionsAndStateStores(t *testing.T) {
 	}
 }
 
+func TestApplyCreatesOwnerOnlySQLiteStateAndLogDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	c := &catalog.Catalog{
+		Version: 1, TargetGroups: map[string]string{"all": "all"},
+		Hosts: []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		StateStores: []catalog.StateStore{
+			{ID: "ledger", Type: "sqlite", Status: "active", Path: "~/.local/state/fsd/news.db", Mode: "0600", ParentMode: "0700", Targets: []string{"all"}},
+			{ID: "logs", Type: "directory", Status: "active", Path: "~/Library/Logs/fsd", Mode: "0700", Targets: []string{"all"}},
+		},
+	}
+	if _, err := Apply(c, target.Selector{TargetGroups: []string{"all"}}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	for path, want := range map[string]os.FileMode{
+		filepath.Join(home, ".local", "state", "fsd"):            0o700,
+		filepath.Join(home, ".local", "state", "fsd", "news.db"): 0o600,
+		filepath.Join(home, "Library", "Logs", "fsd"):            0o700,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+		if info.Mode().Perm() != want {
+			t.Fatalf("%s mode = %04o; want %04o", path, info.Mode().Perm(), want)
+		}
+	}
+}
+
+func TestApplyDoesNotBroadenExistingStateModeWithoutExplicitMode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := filepath.Join(home, ".local", "state", "private")
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	c := &catalog.Catalog{
+		Version: 1, TargetGroups: map[string]string{"all": "all"},
+		Hosts: []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		StateStores: []catalog.StateStore{{
+			ID: "private", Type: "directory", Status: "active", Path: path,
+			Targets: []string{"all"},
+		}},
+	}
+	if _, err := Apply(c, target.Selector{TargetGroups: []string{"all"}}); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("existing state mode = %v, err=%v; want 0700", info.Mode().Perm(), err)
+	}
+}
+
 func TestApplyInstallsCLIWrappersAsSymlinks(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

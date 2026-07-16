@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jnatkins/agentctl/internal/catalog"
+	"github.com/jnatkins/agentctl/internal/pathutil"
 	"github.com/jnatkins/agentctl/internal/target"
 )
 
@@ -233,6 +234,60 @@ func TestAuxServiceWithTemplatePreferredOverGenerated(t *testing.T) {
 	base := filepath.Base(files[0].Path)
 	if base != "com.natty.claude.mysvc.plist" {
 		t.Fatalf("filename = %q, want com.natty.claude.mysvc.plist (not dev.agentctl.service.*)", base)
+	}
+}
+
+func TestWorkloadTemplateUsesCatalogVariablesAndRejectsUnresolvedTokens(t *testing.T) {
+	tmp := t.TempDir()
+	launchdDir := filepath.Join(tmp, "infra", "launchd")
+	if err := os.MkdirAll(launchdDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmplPath := filepath.Join(launchdDir, "com.natty.fsd.demo.plist.template")
+	tmpl := `<plist><dict><key>Label</key><string>com.natty.fsd.demo</string>` +
+		`<key>ProgramArguments</key><array><string>__REPO_ROOT__/bin/fsd-natty</string>` +
+		`<string>__STATE_DIR__</string></array><key>EnvironmentVariables</key><dict>` +
+		`<key>CHANNEL</key><string>__CHANNEL__</string></dict></dict></plist>`
+	if err := os.WriteFile(tmplPath, []byte(tmpl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := &catalog.Catalog{
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		AgentWorkloads: []catalog.AgentWorkload{{
+			ID: "demo", Owner: "fsd", Kind: "schedule", Status: "active",
+			Targets: []string{"all"}, PlistTemplate: tmplPath,
+			TemplateVars: map[string]string{
+				"__STATE_DIR__": "~/state/fsd", "__CHANNEL__": "C0123",
+			},
+		}},
+	}
+	files, err := Launchd(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"})
+	if err != nil {
+		t.Fatalf("Launchd() error = %v", err)
+	}
+	if len(files) != 1 || strings.Contains(string(files[0].Content), "__") {
+		t.Fatalf("template variables were not fully resolved: %v", files)
+	}
+	if !strings.Contains(string(files[0].Content), pathutil.Expand("~/state/fsd")) {
+		t.Fatalf("home-relative catalog path was not expanded: %s", files[0].Content)
+	}
+
+	c.AgentWorkloads[0].TemplateVars = map[string]string{"__STATE_DIR__": "~/state/fsd"}
+	if _, err := Launchd(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"}); err == nil || !strings.Contains(err.Error(), "__CHANNEL__") {
+		t.Fatalf("expected unresolved token failure, got %v", err)
+	}
+	c.AgentWorkloads[0].TemplateVars = map[string]string{
+		"__STATE_DIR__": "__CHANNEL__/state", "__CHANNEL__": "C0123",
+	}
+	if _, err := Launchd(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"}); err == nil || !strings.Contains(err.Error(), "nested template variable") {
+		t.Fatalf("expected nested template-variable failure, got %v", err)
+	}
+	c.AgentWorkloads[0].TemplateVars = map[string]string{
+		"__STATE_DIR__": "bad\x01value", "__CHANNEL__": "C0123",
+	}
+	if _, err := Launchd(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"}); err == nil || !strings.Contains(err.Error(), "unsafe control character") {
+		t.Fatalf("expected XML control-character failure, got %v", err)
 	}
 }
 
