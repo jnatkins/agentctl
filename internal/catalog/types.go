@@ -159,8 +159,14 @@ type AgentWorkload struct {
 	StateStoreRefs       []string          `toml:"state_store_refs"`
 	SourceRefs           []string          `toml:"source_refs"`
 	PlistTemplate        string            `toml:"plist_template"`
-	Notes                string            `toml:"notes"`
-	sourceDir            string
+	TemplateVars         map[string]string `toml:"template_vars"`
+	// Compatibility metadata retained by the live catalog for workloads whose
+	// native launcher owns the exact invocation. PlistTemplate is authoritative
+	// when present; these fields are accepted for inventory and migration notes.
+	LaunchdLabel string `toml:"launchd_label"`
+	RunCommand   string `toml:"run_command"`
+	Notes        string `toml:"notes"`
+	sourceDir    string
 }
 
 type LegacyAutomation AgentWorkload
@@ -187,21 +193,24 @@ type AuxService struct {
 	// and the skillhouse launchd_schedule jobs). Accepted by the loader so the
 	// catalog validates; render still generates the plist programmatically from
 	// Command/Schedule/LogPath, so these are documentation, not render inputs.
-	PlistTemplate string `toml:"plist_template"`
-	Port          int    `toml:"port"`
-	LogDir        string `toml:"log_dir"`
+	PlistTemplate string            `toml:"plist_template"`
+	TemplateVars  map[string]string `toml:"template_vars"`
+	Port          int               `toml:"port"`
+	LogDir        string            `toml:"log_dir"`
 	sourceDir     string
 }
 
 type StateStore struct {
-	ID        string   `toml:"id"`
-	Type      string   `toml:"type"`
-	Status    string   `toml:"status"`
-	Path      string   `toml:"path"`
-	URL       string   `toml:"url"`
-	Targets   []string `toml:"targets"`
-	Notes     string   `toml:"notes"`
-	sourceDir string
+	ID         string   `toml:"id"`
+	Type       string   `toml:"type"`
+	Status     string   `toml:"status"`
+	Path       string   `toml:"path"`
+	Mode       string   `toml:"mode"`
+	ParentMode string   `toml:"parent_mode"`
+	URL        string   `toml:"url"`
+	Targets    []string `toml:"targets"`
+	Notes      string   `toml:"notes"`
+	sourceDir  string
 }
 
 type DataSource struct {

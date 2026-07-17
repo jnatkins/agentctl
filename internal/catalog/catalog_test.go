@@ -71,6 +71,43 @@ log_dir = "~/Library/Logs/agent-aux"
 	}
 }
 
+func TestWorkloadTemplateVariablesAndNativeLauncherMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "agentctl.toml")
+	if err := os.WriteFile(path, []byte(`
+version = 1
+
+[[agent_workloads]]
+id = "news"
+name = "News"
+owner = "fsd"
+kind = "schedule"
+status = "active"
+schedule = "FREQ=DAILY"
+command = "~/dev/fsd/bin/fsd"
+plist_template = "~/dev/fsd/infra/launchd/news.plist.template"
+launchd_label = "com.example.news"
+run_command = "run-local.sh"
+
+[agent_workloads.template_vars]
+__STATE_DIR__ = "~/.local/state/fsd"
+__CHANNEL__ = "C0123"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := Load([]string{path})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if result := Validate(c); result.HasErrors() {
+		t.Fatalf("validation errors: %#v", result.Diagnostics)
+	}
+	workload := c.AgentWorkloads[0]
+	if workload.TemplateVars["__CHANNEL__"] != "C0123" || workload.LaunchdLabel != "com.example.news" || workload.RunCommand != "run-local.sh" {
+		t.Fatalf("workload template metadata was not preserved: %#v", workload)
+	}
+}
+
 func TestDiscoverCatalogPrefersAgentctlRoot(t *testing.T) {
 	dir := t.TempDir()
 	state := filepath.Join(dir, "state")

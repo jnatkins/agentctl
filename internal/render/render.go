@@ -169,7 +169,7 @@ func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 			continue
 		}
 		if w.PlistTemplate != "" {
-			installName, content, err := renderFromTemplate(w.PlistTemplate)
+			installName, content, err := renderFromTemplate(w.PlistTemplate, w.TemplateVars)
 			if err != nil {
 				return nil, err
 			}
@@ -197,7 +197,7 @@ func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 			continue
 		}
 		if svc.PlistTemplate != "" {
-			installName, content, err := renderFromTemplate(svc.PlistTemplate)
+			installName, content, err := renderFromTemplate(svc.PlistTemplate, svc.TemplateVars)
 			if err != nil {
 				return nil, err
 			}
@@ -224,14 +224,15 @@ func Launchd(c *catalog.Catalog, opts Options) ([]File, error) {
 }
 
 // renderFromTemplate reads a checked-in .plist.template file and substitutes
-// __REPO_ROOT__ / __USER__ placeholders, mirroring the sed-substitution in
-// services/agent-conductor/cutover.sh.
+// __REPO_ROOT__ / __USER__ placeholders plus explicitly cataloged template
+// variables. This keeps machine-specific paths and non-secret identifiers in
+// desired state without making the checked-in service template host-specific.
 //
 // The template is expected at <repoRoot>/infra/launchd/<basename>.
 // repoRoot is derived by stripping the trailing /infra/launchd/<file> segments.
 // Returns (installFilename, content, err) where installFilename is the plist
 // basename with ".template" stripped (e.g. "com.natty.claude.x.plist").
-func renderFromTemplate(tmplPath string) (installName string, content []byte, err error) {
+func renderFromTemplate(tmplPath string, templateVars map[string]string) (installName string, content []byte, err error) {
 	expanded := pathutil.Expand(tmplPath)
 	raw, err := os.ReadFile(expanded)
 	if err != nil {
@@ -249,8 +250,26 @@ func renderFromTemplate(tmplPath string) (installName string, content []byte, er
 		}
 	}
 
-	replaced := strings.ReplaceAll(string(raw), "__REPO_ROOT__", repoRoot)
-	replaced = strings.ReplaceAll(replaced, "__USER__", user)
+	replaced := strings.ReplaceAll(string(raw), "__REPO_ROOT__", xmlEscape(repoRoot))
+	replaced = strings.ReplaceAll(replaced, "__USER__", xmlEscape(user))
+	placeholder := regexp.MustCompile(`^__[A-Z][A-Z0-9_]*__$`)
+	for key, value := range templateVars {
+		if !placeholder.MatchString(key) || key == "__REPO_ROOT__" || key == "__USER__" {
+			return "", nil, fmt.Errorf("renderFromTemplate: invalid template variable %q", key)
+		}
+		for _, character := range value {
+			if character < 0x20 && character != '\t' {
+				return "", nil, fmt.Errorf("renderFromTemplate: unsafe control character in %s", key)
+			}
+		}
+		if nested := regexp.MustCompile(`__[A-Z][A-Z0-9_]*__`).FindString(value); nested != "" {
+			return "", nil, fmt.Errorf("renderFromTemplate: nested template variable %s in %s", nested, key)
+		}
+		replaced = strings.ReplaceAll(replaced, key, xmlEscape(pathutil.Expand(value)))
+	}
+	if unresolved := regexp.MustCompile(`__[A-Z][A-Z0-9_]*__`).FindString(replaced); unresolved != "" {
+		return "", nil, fmt.Errorf("renderFromTemplate: unresolved template variable %s", unresolved)
+	}
 
 	// installName = basename of tmplPath with ".template" suffix stripped.
 	base := filepath.Base(expanded)

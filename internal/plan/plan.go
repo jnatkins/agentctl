@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -345,12 +346,50 @@ func planStateStore(store catalog.StateStore) Change {
 	if path == "" {
 		return Change{Action: "check", Resource: "state_store", ID: store.ID, Risk: "medium", Reason: "path is required"}
 	}
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
 		return Change{Action: "create", Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: "path is missing"}
 	} else if err != nil {
 		return Change{Action: "check", Resource: "state_store", ID: store.ID, Path: path, Risk: "medium", Reason: err.Error()}
 	}
+	if store.Mode != "" {
+		want, modeErr := stateStoreMode(store.Mode, defaultStateStoreMode(store.Type))
+		if modeErr != nil {
+			return Change{Action: "check", Resource: "state_store", ID: store.ID, Path: path, Risk: "medium", Reason: modeErr.Error()}
+		}
+		if info.Mode().Perm() != want {
+			return Change{Action: "update", Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: fmt.Sprintf("mode is %04o; want %04o", info.Mode().Perm(), want)}
+		}
+	}
+	if (store.Type == "file" || store.Type == "sqlite") && store.ParentMode != "" {
+		parentInfo, parentErr := os.Stat(filepath.Dir(path))
+		wantParent, parseErr := stateStoreMode(store.ParentMode, 0o755)
+		if parentErr != nil || parseErr != nil {
+			return Change{Action: "check", Resource: "state_store", ID: store.ID, Path: path, Risk: "medium", Reason: "cannot validate parent mode"}
+		}
+		if parentInfo.Mode().Perm() != wantParent {
+			return Change{Action: "update", Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: fmt.Sprintf("parent mode is %04o; want %04o", parentInfo.Mode().Perm(), wantParent)}
+		}
+	}
 	return Change{Action: "no-op", Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: "already present"}
+}
+
+func defaultStateStoreMode(storeType string) os.FileMode {
+	if storeType == "file" || storeType == "sqlite" {
+		return 0o644
+	}
+	return 0o755
+}
+
+func stateStoreMode(raw string, fallback os.FileMode) (os.FileMode, error) {
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseUint(raw, 8, 32)
+	if err != nil || value > 0o777 {
+		return 0, fmt.Errorf("invalid state-store mode %q", raw)
+	}
+	return os.FileMode(value), nil
 }
 
 func applyStateStore(store catalog.StateStore) (Change, error) {
@@ -360,19 +399,46 @@ func applyStateStore(store catalog.StateStore) (Change, error) {
 	case "external":
 		return planned, nil
 	case "directory", "queue":
-		if err := os.MkdirAll(path, 0o755); err != nil {
+		mode, err := stateStoreMode(store.Mode, 0o755)
+		if err != nil {
+			return planned, err
+		}
+		if err := os.MkdirAll(path, mode); err != nil {
 			return Change{Action: planned.Action, Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: err.Error()}, err
+		}
+		if store.Mode != "" {
+			if err := os.Chmod(path, mode); err != nil {
+				return Change{Action: planned.Action, Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: err.Error()}, err
+			}
 		}
 	case "file", "sqlite":
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		parentMode, err := stateStoreMode(store.ParentMode, 0o755)
+		if err != nil {
+			return planned, err
+		}
+		mode, err := stateStoreMode(store.Mode, 0o644)
+		if err != nil {
+			return planned, err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), parentMode); err != nil {
 			return Change{Action: planned.Action, Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: err.Error()}, err
 		}
-		file, err := os.OpenFile(path, os.O_CREATE, 0o644)
+		if store.ParentMode != "" {
+			if err := os.Chmod(filepath.Dir(path), parentMode); err != nil {
+				return Change{Action: planned.Action, Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: err.Error()}, err
+			}
+		}
+		file, err := os.OpenFile(path, os.O_CREATE, mode)
 		if err != nil {
 			return Change{Action: planned.Action, Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: err.Error()}, err
 		}
 		if err := file.Close(); err != nil {
 			return Change{Action: planned.Action, Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: err.Error()}, err
+		}
+		if store.Mode != "" {
+			if err := os.Chmod(path, mode); err != nil {
+				return Change{Action: planned.Action, Resource: "state_store", ID: store.ID, Path: path, Risk: "low", Reason: err.Error()}, err
+			}
 		}
 	}
 	if planned.Action == "no-op" {
