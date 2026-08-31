@@ -62,6 +62,27 @@ reasoning = "low"
 	}
 }
 
+func TestCodexSkipsLaunchdOwnedSchedule(t *testing.T) {
+	c := &catalog.Catalog{
+		Version:      1,
+		TargetGroups: map[string]string{"all": "all"},
+		Hosts:        []catalog.Host{{ID: "local", Hostname: "localhost", TargetGroups: []string{"all"}}},
+		AgentWorkloads: []catalog.AgentWorkload{{
+			ID: "daily", Owner: "ops", Kind: "schedule", Status: "active",
+			Targets: []string{"all"}, Harnesses: []string{"codex"},
+			Schedule: "FREQ=DAILY", Command: "/usr/local/bin/daily",
+			PlistTemplate: "/tmp/com.example.daily.plist.template",
+		}},
+	}
+	files, err := Codex(c, Options{Selector: target.Selector{TargetGroups: []string{"all"}}, OutputDir: "/tmp/out"})
+	if err != nil {
+		t.Fatalf("Codex() error = %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("files len = %d, want 0 for launchd-owned schedule", len(files))
+	}
+}
+
 func TestClaudeMCPRender(t *testing.T) {
 	c := &catalog.Catalog{
 		Version:      1,

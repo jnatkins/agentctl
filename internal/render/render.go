@@ -54,7 +54,7 @@ func All(c *catalog.Catalog, opts Options) ([]File, error) {
 func Codex(c *catalog.Catalog, opts Options) ([]File, error) {
 	var files []File
 	for _, w := range c.AgentWorkloads {
-		if !isActive(w.Status) || w.Kind != "schedule" || !target.Matches(w.Targets, c, opts.Selector) || !contains(w.Harnesses, "codex") {
+		if !isActive(w.Status) || w.Kind != "schedule" || w.PlistTemplate != "" || !target.Matches(w.Targets, c, opts.Selector) || !contains(w.Harnesses, "codex") {
 			continue
 		}
 		path := filepath.Join(opts.OutputDir, "codex", "automations", w.ID, "automation.toml")

@@ -363,3 +363,19 @@ func TestLaunchdScheduleTypeAllowed(t *testing.T) {
 		t.Fatalf("unexpected validation errors for launchd_schedule aux type: %+v", r.Diagnostics)
 	}
 }
+
+func TestScheduleWorkloadWithPlistTemplateIsValid(t *testing.T) {
+	c := &Catalog{
+		Version:      1,
+		TargetGroups: map[string]string{"all": "test group"},
+		Hosts:        []Host{{ID: "h", Hostname: "h", TargetGroups: []string{"all"}}},
+		AgentWorkloads: []AgentWorkload{{
+			ID: "daily", Owner: "ops", Kind: "schedule", Status: "active",
+			Schedule: "StartInterval=300", PlistTemplate: "~/dev/ops/daily.plist.template",
+			Targets: []string{"all"},
+		}},
+	}
+	if r := Validate(c); r.HasErrors() {
+		t.Fatalf("unexpected validation errors for plist-owned schedule: %+v", r.Diagnostics)
+	}
+}

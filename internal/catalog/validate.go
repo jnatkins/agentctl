@@ -192,8 +192,8 @@ func Validate(c *Catalog) ValidationResult {
 		if w.Kind == "queue" && len(w.StateStoreRefs) == 0 && len(w.IntegrationRefs) == 0 {
 			r.err("agent_workload", w.ID, "queue workload requires state_store_refs or integration_refs")
 		}
-		if w.Kind == "schedule" && w.Command == "" && w.RunCommand == "" && w.Prompt == "" && w.PromptFile == "" {
-			r.err("agent_workload", w.ID, "schedule workload requires command, prompt, or prompt_file")
+		if w.Kind == "schedule" && w.Command == "" && w.RunCommand == "" && w.Prompt == "" && w.PromptFile == "" && w.PlistTemplate == "" {
+			r.err("agent_workload", w.ID, "schedule workload requires command, prompt, prompt_file, or plist_template")
 		}
 		checkRefs(&r, "agent_workload", w.ID, "integration_refs", w.IntegrationRefs, integrationIDs)
 		checkRefs(&r, "agent_workload", w.ID, "state_store_refs", w.StateStoreRefs, stateIDs)
